@@ -270,6 +270,32 @@ TRACKS = {
     "abu_dhabi": 0.60
 }
 
+BASE_LAP_TIMES = {
+    "bahrain": 89.0,        # 1:29.000
+    "jeddah": 88.0,         # 1:28.000
+    "australia": 80.5,      # 1:20.500
+    "japan": 89.5,          # 1:29.500
+    "china": 92.0,          # 1:32.000
+    "miami": 88.5,          # 1:28.500
+    "imola": 76.5,          # 1:16.500
+    "monaco": 70.5,         # 1:10.500
+    "canada": 72.0,         # 1:12.000
+    "spain": 74.0,          # 1:14.000
+    "austria": 64.5,        # 1:04.500
+    "silverstone": 87.5,    # 1:27.500
+    "hungary": 77.0,        # 1:17.000
+    "spa": 104.0,           # 1:44.000
+    "zandvoort": 71.5,      # 1:11.500
+    "monza": 79.5,          # 1:19.500
+    "singapore": 91.0,      # 1:31.000
+    "austin": 95.0,         # 1:35.000
+    "mexico": 78.5,         # 1:18.500
+    "brazil": 70.0,         # 1:10.000
+    "las_vegas": 92.5,      # 1:32.500
+    "qatar": 84.0,          # 1:24.000
+    "abu_dhabi": 86.0       # 1:26.000
+}
+
 # ============================
 # SETUP ENGINE
 # ============================
@@ -313,6 +339,33 @@ def generate_setup(base, track, balance, aggression, weather, session_type):
 
     return setup
 
+def project_lap_time(track, tyre, aggression, weather):
+    lap_time = BASE_LAP_TIMES[track]
+
+    # tyre performance
+    tyre_adjustments = {
+        "soft": -0.8,
+        "medium": 0.0,
+        "hard": 0.6,
+        "intermediate": 2.5,
+        "wet": 4.0
+    }
+
+    lap_time += tyre_adjustments[tyre]
+
+    # aggression effect
+    lap_time -= aggression * 0.6
+
+    # weather penalty
+    if weather == "wet":
+        lap_time += 3.0
+
+    return round(lap_time, 3)
+
+def format_lap_time(seconds):
+    minutes = int(seconds // 60)
+    remaining = seconds % 60
+    return f"{minutes}:{remaining:06.3f}"
 
 # ============================
 # UI
@@ -361,57 +414,73 @@ with col1:
 
 with col2:
     weather = st.selectbox("Weather", ["dry", "wet"])
-    balance = st.slider(
-    "Balance",
-    -1.0,
-    1.0,
-    0.0,
-    0.1,
-    help="""
-    -1 = Understeer: the car resists turning and pushes wide through corners.
-    
-    +1 = Oversteer: the rear of the car rotates more aggressively and may step out.
-    
-    0 = Neutral balance.
-    """
-)
-    aggression = st.slider(
-    "Aggression",
-    0.0,
-    1.0,
-    0.5,
-    0.1,
-    help="""
-    Lower values = safer and more stable setup.
 
-    Higher values = more aggressive setup with sharper turn-in and faster lap-time potential.
-    """
-)
+    tyre_compound = st.selectbox(
+        "Tyre Compound",
+        ["soft", "medium", "hard", "intermediate", "wet"],
+        help="""
+        Soft = fastest but highest wear
+        
+        Medium = balanced
+        
+        Hard = durable but slower
+        
+        Intermediate = damp / light rain
+        
+        Wet = full wet conditions
+        """
+    )
+
+    balance = st.slider(
+        "Balance",
+        -1.0,
+        1.0,
+        0.0,
+        0.1
+    )
+
+    aggression = st.slider(
+        "Aggression",
+        0.0,
+        1.0,
+        0.5,
+        0.1
+    )
 
 if st.button("Generate Setup", use_container_width=True):
-    setup = generate_setup(F1_CARS[car_key], track, balance, aggression, weather, session_type)
+    setup = generate_setup(
+        F1_CARS[car_key],
+        track,
+        balance,
+        aggression,
+        weather,
+        session_type
+    )
+
+    projected_time = project_lap_time(
+        track,
+        tyre_compound,
+        aggression,
+        weather
+    )
+
+    formatted_time = format_lap_time(projected_time)
 
     st.subheader(setup["car_name"])
 
+    projected_time = project_lap_time(
+        track,
+        tyre_compound,
+        aggression,
+        weather
+    )
+
+    st.metric(
+        "Projected Lap Time",
+        formatted_time,
+        help="Estimated lap time based on track, tyre compound, aggression, and weather."
+    )
     c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric(
-            "Front Wing",
-            round(setup["front_wing"], 1),
-            help="Controls front-end downforce and turn-in response. Higher values improve cornering grip but reduce top speed."
-        )
-        st.metric(
-            "Rear Wing",
-            round(setup["rear_wing"], 1),
-            help="Controls rear stability and traction. Higher values improve corner exits but add drag."
-        )
-        st.metric(
-            "Brake Bias",
-            round(setup["brake_bias"], 1),
-            help="Percentage of braking force sent to the front axle. Higher values increase braking stability."
-        )
-
     with c2:
         st.metric(
             "Diff On",
