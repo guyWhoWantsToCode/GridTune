@@ -296,6 +296,14 @@ BASE_LAP_TIMES = {
     "abu_dhabi": 86.0       # 1:26.000
 }
 
+tyre_help = {
+    "soft": "Soft → maximum grip and fastest lap times, but high tyre wear.",
+    "medium": "Medium → balanced performance with moderate grip and durability.",
+    "hard": "Hard → lower grip but very durable and consistent over long runs.",
+    "intermediate": "Intermediate → used in light rain or damp conditions. Provides grip on a wet track but overheats if it dries.",
+    "wet": "Wet → used in heavy rain. Deep grooves disperse water to prevent aquaplaning."
+}
+
 # ============================
 # SETUP ENGINE
 # ============================
@@ -303,8 +311,17 @@ def generate_setup(base, track, balance, aggression, weather, session_type):
     setup = copy.deepcopy(base)
     df = TRACKS[track]
 
-    setup["front_wing"] = int(10 * df) + balance * 2
-    setup["rear_wing"] = int(12 * df) - balance * 2
+    # Base aero (0–50 scale)
+    setup["front_wing"] = int(50 * df)
+    setup["rear_wing"] = int(50 * df)
+
+    # Balance adjustment
+    setup["front_wing"] += balance * 5
+    setup["rear_wing"] -= balance * 5
+
+    # Clamp to valid range
+    setup["front_wing"] = max(0, min(50, setup["front_wing"]))
+    setup["rear_wing"] = max(0, min(50, setup["rear_wing"]))
     setup["diff_on"] += aggression * 8
     setup["diff_off"] += balance * 3
     setup["arb_front"] -= balance * 2
@@ -339,10 +356,10 @@ def generate_setup(base, track, balance, aggression, weather, session_type):
 
     return setup
 
-def project_lap_time(track, tyre, aggression, weather):
+def project_lap_time(track, tyre, aggression, weather, session_type):
     lap_time = BASE_LAP_TIMES[track]
 
-    # tyre performance
+    # Tyre compound effect
     tyre_adjustments = {
         "soft": -0.8,
         "medium": 0.0,
@@ -353,12 +370,20 @@ def project_lap_time(track, tyre, aggression, weather):
 
     lap_time += tyre_adjustments[tyre]
 
-    # aggression effect
+    # Driving aggression
     lap_time -= aggression * 0.6
 
-    # weather penalty
+    # Weather penalty
     if weather == "wet":
         lap_time += 3.0
+
+    # Session type adjustment
+    if session_type == "race":
+        lap_time += 1.2
+    elif session_type == "quali":
+        lap_time -= 0.8
+    elif session_type == "time_trial":
+        lap_time -= 1.2
 
     return round(lap_time, 3)
 
@@ -367,13 +392,23 @@ def format_lap_time(seconds):
     remaining = seconds % 60
     return f"{minutes}:{remaining:06.3f}"
 
+def get_tyres(session_type, weather):
+    if weather == "wet":
+        return ["intermediate", "wet"]
+
+    if session_type == "race":
+        return ["soft", "medium", "hard"]
+    elif session_type == "quali":
+        return ["soft"]
+    elif session_type == "time_trial":
+        return ["soft"]
+
+    return ["medium"]
+
 # ============================
 # UI
 # ============================
-st.image(
-    "Untitled design (3).png",
-    width=350
-)
+
 st.markdown(
     """
     <div class="main-title"></div>
@@ -415,22 +450,6 @@ with col1:
 with col2:
     weather = st.selectbox("Weather", ["dry", "wet"])
 
-    tyre_compound = st.selectbox(
-        "Tyre Compound",
-        ["soft", "medium", "hard", "intermediate", "wet"],
-        help="""
-        Soft = fastest but highest wear
-        
-        Medium = balanced
-        
-        Hard = durable but slower
-        
-        Intermediate = damp / light rain
-        
-        Wet = full wet conditions
-        """
-    )
-
     balance = st.slider(
         "Balance",
         -1.0,
@@ -448,6 +467,8 @@ with col2:
     )
 
 if st.button("Generate Setup", use_container_width=True):
+
+    # FIRST: generate setup
     setup = generate_setup(
         F1_CARS[car_key],
         track,
@@ -457,30 +478,58 @@ if st.button("Generate Setup", use_container_width=True):
         session_type
     )
 
-    projected_time = project_lap_time(
-        track,
-        tyre_compound,
-        aggression,
-        weather
-    )
-
-    formatted_time = format_lap_time(projected_time)
+    # THEN: lap times
+    tyres = get_tyres(session_type, weather)
 
     st.subheader(setup["car_name"])
 
-    projected_time = project_lap_time(
-        track,
-        tyre_compound,
-        aggression,
-        weather
-    )
+    st.markdown("### Projected Lap Times")
 
-    st.metric(
-        "Projected Lap Time",
+    lap_cols = st.columns(len(tyres))
+
+    for i, tyre in enumerate(tyres):
+        projected_time = project_lap_time(
+            track,
+            tyre,
+            aggression,
+            weather,
+            session_type
+        )
+
+        formatted_time = format_lap_time(projected_time)
+
+        with lap_cols[i]:
+            st.metric(
+        tyre.capitalize(),
         formatted_time,
-        help="Estimated lap time based on track, tyre compound, aggression, and weather."
+        help=f"""
+        {tyre_help[tyre]}
+
+        Estimated for a {session_type} session in {weather} conditions.
+        """
     )
+    # THEN: setup metrics
     c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric(
+            "Front Wing",
+            round(setup["front_wing"], 1),
+            help="Increases front-end grip and turn-in. Lower it for more top speed."
+        )
+
+        st.metric(
+            "Rear Wing",
+            round(setup["rear_wing"], 1),
+            help="Improves rear stability and traction. Lower it for higher straight-line speed."
+        )
+
+        st.metric(
+            "Brake Bias",
+            round(setup["brake_bias"], 1),
+            help="Percentage of braking force sent to the front wheels. Higher = more stable braking."
+        )
+
     with c2:
         st.metric(
             "Diff On",
